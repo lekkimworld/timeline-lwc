@@ -14,7 +14,7 @@ public with sharing class TimelineService {
     public static Map<String, String> getTimelineTypes(String parentObjectId, String parentFieldName) {
         try {
             Map<String, String> parentDetails = getParentDetails(parentObjectId, parentFieldName);
-
+			
             String parentObjectType = parentDetails.get('QueryObjectType');
             String parentConfigType = parentDetails.get('ConfigObjectType');
             parentObjectId = parentDetails.get('Id');
@@ -26,7 +26,8 @@ public with sharing class TimelineService {
                 'Relationship_Name__c, ' +
                 'Object_Name__c, ' +
                 'Tooltip_Object_Name__c, ' +
-                'Sequence__c ' +
+                'Sequence__c, ' +
+                'Apex_Class__c ' +
                 'FROM Timeline_Configuration__mdt ' +
                 'WHERE Active__c = true AND ' +
                 'Test__c = ' +
@@ -40,6 +41,13 @@ public with sharing class TimelineService {
             Map<String, String> mapOfTimelineTypes = new Map<String, String>();
 
             for (Timeline_Configuration__mdt timelineType : listOfTimelineConfigurations) {
+                // handle apex class configurations
+                if (!String.isEmpty(timelineType.Apex_Class__c)) {
+                    mapOfTimelineTypes.put(timelineType.Object_Name__c, timelineType.Object_Name__c);
+                    continue;
+                }
+                
+                // handle regular object configurations
                 if (childObjects.containsKey(timelineType.Object_Name__c + timelineType.Relationship_Name__c)) {
                     String objectLabel = ((SObject) (Type.forName(
                                 'Schema.' + String.valueOf(timelineType.Object_Name__c)
@@ -103,6 +111,8 @@ public with sharing class TimelineService {
 
             earliestRange = String.ValueOf((Decimal.ValueOf(earliestRange) * 12).intValue());
             latestRange = String.ValueOf((Decimal.ValueOf(latestRange) * 12).intValue());
+            final Date rangeStart = Date.today().addMonths(-1 * Integer.valueOf(earliestRange));
+            final Date rangeEnd = Date.today().addMonths(Integer.valueOf(latestRange));
 
             String queryTimelineConfiguration =
                 'SELECT Detail_Field__c, ' +
@@ -119,6 +129,8 @@ public with sharing class TimelineService {
                 'Tooltip_Id_Field__c, ' +
                 'Tooltip_Object_Name__c, ' +
                 'Fallback_Tooltip_Field__c, ' +
+                'No_Drilldown__c, ' + 
+                'Apex_Class__c, ' +
                 'Inclusion_Field__c ' +
                 'FROM Timeline_Configuration__mdt ' +
                 'WHERE Active__c = true AND ' +
@@ -140,7 +152,7 @@ public with sharing class TimelineService {
             Map<String, TimelineRecord> mapOfTimelineConfigurationRecords = new Map<String, TimelineRecord>();
 
             for (Timeline_Configuration__mdt timelineConfigurationRecord : listOfTimelineConfigurations) {
-                TimelineRecord timelineRecord = new timelineRecord();
+                TimelineRecord timelineRecord = new TimelineRecord();
                 timelineRecord.relationshipName = timelineConfigurationRecord.Relationship_Name__c;
                 timelineRecord.icon = timelineConfigurationRecord.Icon__c;
                 timelineRecord.iconBackground = timelineConfigurationRecord.Icon_Background_Colour__c;
@@ -155,6 +167,8 @@ public with sharing class TimelineService {
                 timelineRecord.tooltipObject = timelineConfigurationRecord.Tooltip_Object_Name__c;
                 timelineRecord.drilldownIdField = timelineConfigurationRecord.Drilldown_Id_Field__c;
                 timelineRecord.inclusionField = timelineConfigurationRecord.Inclusion_Field__c;
+                timelineRecord.noDrilldown = timelineConfigurationRecord.No_Drilldown__c;
+                timelineRecord.apexClass = timelineConfigurationRecord.Apex_Class__c;
            
                 mapOfTimelineConfigurationRecords.put(
                     timelineRecord.objectName + timelineRecord.relationshipName,
@@ -168,6 +182,7 @@ public with sharing class TimelineService {
 
             for (String eachObject : mapOfTimelineConfigurationRecords.keyset()) {
                 TimelineRecord tcr = mapOfTimelineConfigurationRecords.get(eachObject);
+                if (!String.isEmpty(tcr.apexClass)) continue;
 
                 if (childObjects.containsKey(eachObject)) {
                     String objName = String.valueOf(tcr.objectName);
@@ -379,6 +394,46 @@ public with sharing class TimelineService {
                     }
                 }
             }
+
+            for (String eachObject : mapOfTimelineConfigurationRecords.keyset()) {
+                TimelineRecord tcr = mapOfTimelineConfigurationRecords.get(eachObject);
+                if (String.isEmpty(tcr.apexClass)) continue;
+                
+                try {
+                    // instantiate fetcher and invoke
+                    Type t = Type.forName(tcr.apexClass);
+                    final ITimelineApexRecordsFetcher f = (ITimelineApexRecordsFetcher)t.newInstance();
+                    final List<ITimelineApexRecord> records = f.fetchRecords(parentObjectType, parentObjectId, rangeStart, rangeEnd);
+                    for (ITimelineApexRecord record : records) {
+                        Map<String, String> mapData = new Map<String, String>();
+                        mapData.put('objectId', record.getObjectId());
+                        mapData.put('parentObject', parentObjectType);
+                        mapData.put('positionDateField', record.getPositionDateLabel());
+                        mapData.put('positionDateValue', String.valueOf(record.getPositionDateValue()));
+                        mapData.put('objectName', tcr.objectName);
+    
+                        mapData.put('detailFieldLabel', record.getDetailFieldLabel());
+                        mapData.put('detailField', record.getDetailFieldValue());
+    
+                        mapData.put('fallbackTooltipField', record.getFallbackTooltipFieldLabel());
+                        mapData.put('fallbackTooltipValue', record.getFallbackTooltipFieldValue());
+                        
+                        mapData.put('noDrilldown', tcr.noDrilldown ? 'true' : 'false');
+                        mapData.put('drilldownId', 'drilldown_id');
+                        mapData.put('tooltipId', 'tooltip_id');
+                        mapData.put('tooltipObject', tcr.tooltipObject);
+                        mapData.put('type', tcr.type);
+                        mapData.put('icon', String.isEmpty(record.getIcon()) ? tcr.icon : record.getIcon());
+                        mapData.put('iconBackground', String.isEmpty(record.getIconBackgroundColor()) ? tcr.iconBackground : record.getIconBackgroundColor());
+                        
+                        listOfTimelineData.add(mapData);
+                    }
+                    
+                } catch (Exception e) {
+                    System.debug('Error for ' + tcr.apexClass + ': ' + e.getMessage());
+                }
+            }
+
             return listOfTimelineData;
         } catch (TimelineSetupException e) {
             throw new AuraHandledException(e.getMessage());
@@ -644,6 +699,8 @@ public with sharing class TimelineService {
         private String fallbackNameField;
         private String fallbackNameValue;
         private String inclusionField;
+        private Boolean noDrilldown;
+        private String apexClass;
         private Id recordId;
     }
 

@@ -479,6 +479,7 @@ export default class timeline extends NavigationMixin(LightningElement) {
             recordCopy.tooltipId = record.tooltipId;
             recordCopy.tooltipObject = record.tooltipObject;
             recordCopy.drilldownId = record.drilldownId;
+            recordCopy.noDrilldown = record.noDrilldown;
 
             recordCopy.type = record.type;
             recordCopy.icon = record.icon;
@@ -709,6 +710,10 @@ export default class timeline extends NavigationMixin(LightningElement) {
                     .attr('y', 16)
                     .attr('font-size', 12)
                     .on('click', function (event, d) {
+                        // abort if configuration has noDrilldown set
+                        if (d.noDrilldown) return;
+
+                        // get record id
                         let drilldownId = d.recordId;
                         if (d.drilldownId !== '') {
                             drilldownId = d.drilldownId;

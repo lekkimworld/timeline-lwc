@@ -34,6 +34,10 @@
                 <behavior>Edit</behavior>
                 <field>Inclusion_Field__c</field>
             </layoutItems>
+            <layoutItems>
+                <behavior>Edit</behavior>
+                <field>Apex_Class__c</field>
+            </layoutItems>
         </layoutColumns>
         <layoutColumns>
             <layoutItems>
@@ -117,6 +121,10 @@
             <layoutItems>
                 <behavior>Edit</behavior>
                 <field>Drilldown_Id_Field__c</field>
+            </layoutItems>
+            <layoutItems>
+                <behavior>Edit</behavior>
+                <field>No_Drilldown__c</field>
             </layoutItems>
         </layoutColumns>
         <layoutColumns/>
